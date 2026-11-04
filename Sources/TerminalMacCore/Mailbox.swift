@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 import Darwin
 
@@ -102,4 +103,21 @@ public final class Mailbox {
         }
         throw MailboxTimeout(action: request.action, pickedUp: (try? read(requestName)) == nil)
     }
+}
+
+/// Decompresses a guest frame into a buffer of exactly the size the frame claims. Output never
+/// exceeds that size, so a small malicious file cannot expand to exhaust host memory.
+public func decompressedFrame(_ compressed: Data, expectedSize: Int) -> Data? {
+    guard expectedSize > 0, !compressed.isEmpty else { return nil }
+    // One spare byte: a frame that fills it is larger than it claimed.
+    var output = Data(count: expectedSize + 1)
+    let written = output.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) -> Int in
+        compressed.withUnsafeBytes { (source: UnsafeRawBufferPointer) -> Int in
+            compression_decode_buffer(destination.bindMemory(to: UInt8.self).baseAddress!, destination.count,
+                                      source.bindMemory(to: UInt8.self).baseAddress!, source.count, nil, COMPRESSION_LZ4)
+        }
+    }
+    guard written == expectedSize else { return nil }
+    output.removeLast()
+    return output
 }

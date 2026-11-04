@@ -3,6 +3,7 @@ import CPhoneShim
 import Darwin
 import Foundation
 import ImageIO
+import TerminalMacCore
 import TerminalUI
 import UniformTypeIdentifiers
 
@@ -103,8 +104,7 @@ final class DesktopRenderer: @unchecked Sendable {
     private func decode(_ frame: DesktopFrame) -> CGImage? {
         switch frame {
         case .pixels(let compressed, let width, let height, let bytesPerRow):
-            guard let pixels = try? (compressed as NSData).decompressed(using: .lz4) as Data,
-                  bytesPerRow >= width * 4, pixels.count == bytesPerRow * height,
+            guard bytesPerRow >= width * 4, let pixels = decompressedFrame(compressed, expectedSize: bytesPerRow * height),
                   let provider = CGDataProvider(data: pixels as CFData) else { return nil }
             return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow, space: colorSpace,
                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
