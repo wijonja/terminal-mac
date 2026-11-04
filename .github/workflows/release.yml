@@ -1,0 +1,74 @@
+name: Release
+# Builds a release in GitHub Actions and records signed build provenance, so users can check that an
+# archive came from this workflow rather than trusting whoever can edit the release.
+# Creates a draft: a maintainer reviews it and publishes it by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (major.minor.patch)
+        required: true
+      build:
+        description: Build number (must increase with every release)
+        required: true
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ inputs.version }}
+      BUILD_NUMBER: ${{ inputs.build }}
+      GITHUB_REPO: ${{ github.repository }}
+    steps:
+      - name: Check inputs
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Version must be major.minor.patch.' >&2; exit 1; }
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'Build must be a positive integer.' >&2; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+      - name: Test
+        run: swift test
+      - name: Import signing identity into a temporary keychain
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          [[ -n "$SIGNING_P12_BASE64" && -n "$SIGNING_P12_PASSWORD" ]] || { echo 'Set the SIGNING_P12_BASE64 and SIGNING_P12_PASSWORD secrets. See RELEASING.md.' >&2; exit 1; }
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          umask 077
+          printf '%s' "$SIGNING_P12_BASE64" | base64 -d > "$RUNNER_TEMP/identity.p12"
+          security import "$RUNNER_TEMP/identity.p12" -k "$keychain" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign >/dev/null
+          rm -f "$RUNNER_TEMP/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+      - name: Build, sign and package
+        run: bash scripts/release.sh
+      - name: Record build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/releases/*-publish/*
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION-$BUILD_NUMBER" dist/releases/*-publish/* \
+            --repo "$GITHUB_REPO" --draft --title "terminal-mac $VERSION" --target "$GITHUB_SHA"
+      - name: Remove temporary keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/identity.p12"

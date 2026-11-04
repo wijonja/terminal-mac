@@ -68,6 +68,19 @@ Users install with `curl -fsSL https://github.com/govijr/terminal-mac/releases/l
 
 The repository is also a Claude Code plugin marketplace. `.claude-plugin/plugin.json` registers the MCP server (`terminal-mac mcp`, which must be on PATH) and the skill in `skills/`. Users run `/plugin install terminal-mac --marketplace govijr/terminal-mac`. Check with `claude plugin validate .`, and keep `plugin.json`'s version in step with `VERSION`. The same `skills/` folder works with `npx skills add govijr/terminal-mac --skill terminal-mac`.
 
+## Build provenance (GitHub Actions)
+
+`.github/workflows/release.yml` builds a release in GitHub Actions, records signed build provenance for every published file, and creates a **draft** release for a maintainer to review and publish. Run it from the Actions tab or with `gh workflow run release.yml -f version=0.2.0 -f build=7`.
+
+It needs two repository secrets:
+
+- `SIGNING_P12_BASE64`: your exported signing identity, base64-encoded.
+- `SIGNING_P12_PASSWORD`: the password you set when exporting it.
+
+Protect them with a GitHub environment that requires reviewers if more than one person has write access. This moves the signing key from your keychain to GitHub, which is a real trade-off: anyone who can change and run workflows on the default branch could use it. Keep using a local `release.sh` if you prefer. Those releases have no provenance, and `gh attestation verify` fails for them.
+
+Provenance proves which workflow and commit built a file. It doesn't prove that commit is safe, and `curl | bash` doesn't check it, so users must run the verification in the README themselves.
+
 ## Hosting and current release status
 
 Releases go to `govijr/terminal-mac`. Release scripts produce local immutable artifacts and upload-ready files; they never publish. Once a download host is selected, publish the production ZIP and its checksum there; do not advertise a placeholder installation URL.

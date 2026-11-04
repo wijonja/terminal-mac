@@ -22,7 +22,15 @@ The guest is a separate Mac: it has its own apps, files, accounts and permission
 curl -fsSL https://github.com/govijr/terminal-mac/releases/latest/download/get.sh | bash
 ```
 
-The installer downloads the latest release and verifies its SHA-256 before installing. You can also extract a release ZIP and run `bash install.sh` from it.
+The installer downloads the latest release and verifies its SHA-256 before installing. That catches corrupted downloads, but the checksum comes from the same release, so it can't detect a tampered release. You can also extract a release ZIP and run `bash install.sh` from it.
+
+To check where a release came from, download its ZIP and verify it with the [GitHub CLI](https://cli.github.com) before installing. Releases built by the release workflow carry signed build provenance:
+
+```sh
+gh attestation verify terminal-mac-VERSION-BUILD-macos-arm64.zip --repo govijr/terminal-mac
+```
+
+For the strongest guarantee, build from source at a commit you've reviewed.
 
 The installer places one launcher in `~/.local/bin` and the bundled runtime under `~/.local/lib/terminal-mac`. Add `~/.local/bin` to your PATH to use simply `terminal-mac`. It needs no administrator rights and does not edit your shell configuration. `bash install.sh --prefix /absolute/path` selects another location.
 
