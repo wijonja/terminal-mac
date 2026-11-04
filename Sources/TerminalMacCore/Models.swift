@@ -85,6 +85,32 @@ public struct Reply: Codable {
     }
 }
 
+/// Text from the guest is untrusted. This removes anything a terminal could act on or that could
+/// hide content (control, bidi and format characters) and bounds the length.
+public func sanitizedGuestText(_ text: String, limit: Int = 300) -> String {
+    let safe = text.unicodeScalars.filter { scalar in
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .surrogate, .unassigned: return false
+        default: return true
+        }
+    }
+    return String(String(safe).prefix(limit))
+}
+
+/// The guest status fields a host may show, each checked for its expected form. Anything else is
+/// dropped, so a compromised guest cannot use the status reply to put free text in front of an agent.
+public func guestStatusSummary(_ values: [String: String]) -> [String] {
+    func matches(_ value: String, _ pattern: String) -> Bool { value.range(of: pattern, options: .regularExpression) != nil }
+    let allowed: [(key: String, pattern: String)] = [
+        ("accessibility", "^(true|false)$"), ("height", "^[0-9]{1,5}$"), ("screenRecording", "^(true|false)$"),
+        ("version", "^[0-9A-Za-z.+-]{1,32}$"), ("width", "^[0-9]{1,5}$")
+    ]
+    return allowed.compactMap { field in
+        guard let value = values[field.key], matches(value, field.pattern) else { return nil }
+        return "\(field.key): \(value)"
+    }
+}
+
 public struct Store {
     public let root: URL
     public init(root: URL? = nil) {
