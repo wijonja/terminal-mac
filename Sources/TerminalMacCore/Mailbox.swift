@@ -94,7 +94,7 @@ public final class Mailbox {
             if let data = try read(replyName) {
                 let reply = try JSONDecoder().decode(Reply.self, from: data)
                 guard reply.id == request.id else { throw Failure("Mismatched reply") }
-                if !reply.ok { throw Failure(reply.error ?? "Action failed") }
+                if !reply.ok { throw Failure(sanitizedGuestText(reply.error ?? "Action failed")) }
                 return reply
             }
             try await Task.sleep(nanoseconds: interval)
