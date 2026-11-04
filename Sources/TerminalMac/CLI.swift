@@ -113,6 +113,11 @@ final class CLI {
             try store.save(machine)
             try printJSON(["name": name, "display": "\(machine.width)×\(machine.height) points at \(machine.displayScale)x"])
         case "action": try await action(tail)
+        case "vsock-probe":
+            let args = try Arguments(tail)
+            let name = try args.machineName()
+            _ = try store.load(name)
+            try printJSON(try await host(name, action: "vsock-probe", timeout: 15).values)
         case "mcp":
             let args = try Arguments(tail, flags: ["config"])
             let name = try args.machineName()
@@ -149,10 +154,12 @@ final class CLI {
             let viewer = try TerminalViewer(directory: store.directory(name), machine: machine, graphics: args.options["protocol"], readOnly: args.flags.contains("read-only"))
             try await viewer.run()
         case "guest":
-            let args = try Arguments(tail, flags: ["check"], options: ["exchange"])
+            let args = try Arguments(tail, flags: ["check", "vsock-probe", "vsock-probe-client"], options: ["exchange"])
             guard args.positionals.isEmpty else { throw Failure("Usage: terminal-mac guest [--check] [--exchange PATH]") }
             try GuestGuard.requireVirtualMac()
             if args.flags.contains("check") { print("virtual-mac"); return }
+            if args.flags.contains("vsock-probe") { try VsockProbe.serve() }
+            if args.flags.contains("vsock-probe-client") { VsockProbe.tryLocalConnections(); return }
             if try await GuestBootstrap.installAndRelaunchIfNeeded() { return }
             let exchange = URL(fileURLWithPath: args.options["exchange"] ?? "/Volumes/My Shared Files/control")
             guest = try GuestRuntime(exchange: exchange)
