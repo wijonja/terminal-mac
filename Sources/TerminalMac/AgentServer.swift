@@ -120,13 +120,9 @@ final class AgentServer {
         try requireRunning()
         let mailbox = try exchange()
         let request = Request(action: "screenshot", timeout: 15)
-        let imageName = "image-\(request.id.uuidString).png"
-        defer { mailbox.remove(imageName) }
+        defer { mailbox.remove(guestFrameName(request.id)) }
         let reply = try await guest(request, mailbox: mailbox)
-        guard reply.values["image"] == imageName, let png = try mailbox.read(imageName, limit: 64 * 1024 * 1024),
-              let source = CGImageSourceCreateWithData(png as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            throw Failure("The guest helper returned an invalid screenshot")
-        }
+        let image = try guestScreenshot(reply, request: request, mailbox: mailbox)
         let jpeg = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(jpeg, UTType.jpeg.identifier as CFString, 1, nil) else { throw Failure("Cannot encode screenshot") }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)

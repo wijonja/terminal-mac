@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import Virtualization
 import TerminalMacCore
 import Darwin
@@ -188,14 +190,17 @@ final class CLI {
         let timeout = try args.integer("timeout", default: 15, range: 1...120)
         let mailbox = try Mailbox(store.directory(name).appendingPathComponent("exchange"))
         let request = Request(action: verb, arguments: parameters, timeout: Double(timeout))
-        let imageName = "image-\(request.id.uuidString).png"
-        defer { mailbox.remove(imageName) }
+        defer { mailbox.remove(guestFrameName(request.id)) }
         let reply = try await mailbox.call(request)
         var values = reply.values
         if verb == "screenshot" || verb == "snapshot" {
-            guard values["image"] == imageName, let png = try mailbox.read(imageName, limit: 32 * 1024 * 1024) else { throw Failure("Invalid guest image response") }
+            let png = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil) else { throw Failure("Cannot encode screenshot") }
+            CGImageDestinationAddImage(destination, try guestScreenshot(reply, request: request, mailbox: mailbox), nil)
+            guard CGImageDestinationFinalize(destination) else { throw Failure("Cannot encode screenshot") }
+            values = ["image": "", "width": values["width"] ?? "", "height": values["height"] ?? ""]
             let output = URL(fileURLWithPath: ((args.options["output"] ?? "terminal-mac-\(name).png") as NSString).expandingTildeInPath)
-            try png.write(to: output, options: .atomic)
+            try (png as Data).write(to: output, options: .atomic)
             values["image"] = output.path
         }
         try printJSON(values)
