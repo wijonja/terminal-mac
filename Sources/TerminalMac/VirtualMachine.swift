@@ -29,6 +29,7 @@ enum VirtualMachines {
         config.keyboards = [VZUSBKeyboardConfiguration()]
         config.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+        config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
         if machine.network {
             let network = VZVirtioNetworkDeviceConfiguration()
             network.attachment = VZNATNetworkDeviceAttachment()
@@ -163,6 +164,7 @@ final class MachineRuntime: NSObject, VZVirtualMachineDelegate, NSWindowDelegate
                 window?.orderOut(nil); NSApp.hide(nil)
             case "pause": try await vm.pause()
             case "resume": try await vm.resume()
+            case "vsock-probe": values = try await VsockProbe.ping(vm)
             case "stop":
                 if request.arguments["force"] == "true" {
                     try await vm.stop()
