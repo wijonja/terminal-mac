@@ -87,4 +87,17 @@ final class DesktopStream: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         let pixels = NSData(bytesNoCopy: base, length: bytesPerRow * height, freeWhenDone: false)
         return (try pixels.compressed(using: .lz4) as Data, width, height, bytesPerRow)
     }
+    /// A still image in the same format as live frames.
+    static func encode(_ image: CGImage) throws -> (data: Data, width: Int, height: Int, bytesPerRow: Int) {
+        let bytesPerRow = image.width * 4
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else {
+            throw Failure("Cannot encode guest screenshot")
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let base = context.data else { throw Failure("Cannot encode guest screenshot") }
+        let pixels = NSData(bytesNoCopy: base, length: bytesPerRow * image.height, freeWhenDone: false)
+        return (try pixels.compressed(using: .lz4) as Data, image.width, image.height, bytesPerRow)
+    }
 }

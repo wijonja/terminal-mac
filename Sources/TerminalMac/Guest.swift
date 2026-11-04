@@ -121,10 +121,10 @@ final class GuestRuntime: NSObject {
                 config.width = Int(bounds.width); config.height = Int(bounds.height)
                 config.showsCursor = true
                 let image = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []), configuration: config)
-                guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { throw Failure("Cannot encode guest screenshot") }
-                let filename = "image-\(request.id.uuidString).png"
-                try mailbox.write(png, named: filename)
-                values = ["image": filename, "width": String(image.width), "height": String(image.height)]
+                let encoded = try DesktopStream.encode(image)
+                let filename = guestFrameName(request.id)
+                try mailbox.write(encoded.data, named: filename)
+                values = ["image": filename, "format": "bgra-lz4", "width": String(encoded.width), "height": String(encoded.height), "bytesPerRow": String(encoded.bytesPerRow)]
             case "click", "move":
                 try requireAccessibility()
                 let point = try coordinates(request)

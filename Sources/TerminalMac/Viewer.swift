@@ -12,7 +12,7 @@ final class TerminalViewer {
     }
     /// `login`: nobody reads the mailbox, so the guest has no logged-in session (or no helper) yet.
     /// `permissions`: the helper runs but macOS has not allowed it to capture the screen yet.
-    private enum Link: Equatable { case connecting, live, snapshots, login, permissions, waiting(String) }
+    private enum Link: Equatable { case connecting, live, login, permissions, waiting(String) }
     private struct Layout: Equatable {
         let desktop: DesktopPlacement
         let border: Bool
@@ -159,7 +159,7 @@ final class TerminalViewer {
                 let request = Request(action: "screenshot", arguments: ["format": "bgra-lz4", "since": String(since), "wait": "500",
                                                                       "maxWidth": String(target?.imageWidth ?? 1280), "maxHeight": String(target?.imageHeight ?? 800)],
                                       timeout: link == .login ? 2 : 6)
-                defer { mailbox.remove("image-\(request.id.uuidString).bin"); mailbox.remove("image-\(request.id.uuidString).png") }
+                defer { mailbox.remove(guestFrameName(request.id)) }
                 do {
                     let reply = try await mailbox.call(request)
                     failures = 0
@@ -171,19 +171,13 @@ final class TerminalViewer {
                         points = (w, h); forceRelayout()
                     }
                     if v["unchanged"] == "true" { if link != .live { link = .live }; continue }
-                    guard let name = v["image"], [".bin", ".png"].contains(where: { name == "image-\(request.id.uuidString)\($0)" }),
-                          let data = try mailbox.read(name, limit: 64 * 1024 * 1024) else { throw Failure("Invalid frame from the guest helper") }
-                    if v["format"] == "bgra-lz4" {
-                        guard let width = Int(v["width"] ?? ""), let height = Int(v["height"] ?? ""), let stride = Int(v["bytesPerRow"] ?? ""),
-                              (1...8192).contains(width), (1...8192).contains(height), (width * 4...width * 4 + 1024).contains(stride) else { throw Failure("Invalid frame size") }
-                        since = Int(v["sequence"] ?? "") ?? -1
-                        link = .live
-                        renderer.submit(.pixels(data, width: width, height: height, bytesPerRow: stride))
-                    } else {
-                        link = .snapshots
-                        renderer.submit(.encoded(data))
-                        try await Task.sleep(nanoseconds: 120_000_000)
-                    }
+                    guard v["format"] == "bgra-lz4" else { throw Failure("The guest helper is out of date. Open My Shared Files/tools/TerminalMacGuest.app in the VM") }
+                    guard v["image"] == guestFrameName(request.id), let data = try mailbox.read(guestFrameName(request.id), limit: 64 * 1024 * 1024) else { throw Failure("Invalid frame from the guest helper") }
+                    guard let width = Int(v["width"] ?? ""), let height = Int(v["height"] ?? ""), let stride = Int(v["bytesPerRow"] ?? ""),
+                          (1...8192).contains(width), (1...8192).contains(height), (width * 4...width * 4 + 1024).contains(stride) else { throw Failure("Invalid frame size") }
+                    since = Int(v["sequence"] ?? "") ?? -1
+                    link = .live
+                    renderer.submit(DesktopFrame(data: data, width: width, height: height, bytesPerRow: stride))
                 } catch {
                     if Task.isCancelled { break }
                     failures += 1
@@ -284,7 +278,6 @@ final class TerminalViewer {
         case .connecting: [Span("\(spin) connecting", Theme.yellow)]
         case .live where fps >= 0.5: [Span("● ", Theme.green), Span("live", Theme.bold + Theme.green), Span("  \(Int(fps.rounded())) fps", Theme.muted)]
         case .live: [Span("● ", Theme.green), Span("live", Theme.bold + Theme.green), Span("  idle", Theme.faint)]
-        case .snapshots: [Span("◐ ", Theme.yellow), Span("snapshots", Theme.yellow), Span(" · old guest helper: open My Shared Files/tools/TerminalMacGuest in the VM", Theme.faint)]
         case .login: [Span("◌ ", Theme.yellow), Span("at login screen", Theme.yellow)]
         case .permissions: [Span("◌ ", Theme.yellow), Span("needs permissions", Theme.yellow)]
         case .waiting: [Span("\(spin) ", Theme.yellow), Span("waiting for guest", Theme.yellow)]
@@ -462,7 +455,7 @@ final class TerminalViewer {
         func flush() { if !text.isEmpty { enqueue("type", ["text": text], label: Self.typeLabel(text)); text = "" } }
         for event in events {
             if case .quit = event { quit = true; return }
-            if case .key("ctrl+o") = event, (link != .live && link != .snapshots) || inputBlocked { openLoginWindow(); continue }
+            if case .key("ctrl+o") = event, link != .live || inputBlocked { openLoginWindow(); continue }
             guard !readOnly else { continue }
             if palette {
                 switch event {

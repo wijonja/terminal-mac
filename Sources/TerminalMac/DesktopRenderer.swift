@@ -15,12 +15,9 @@ enum DesktopTransport: String {
     case iterm = "iTerm2 png"
 }
 
-/// A guest frame as it arrives from the mailbox. Decoding happens on the render queue.
-enum DesktopFrame {
-    /// lz4-compressed BGRA rows from the live stream.
-    case pixels(Data, width: Int, height: Int, bytesPerRow: Int)
-    /// A PNG from a guest helper that predates the live stream.
-    case encoded(Data)
+/// lz4-compressed BGRA rows as they arrive from the mailbox. Decoding happens on the render queue.
+struct DesktopFrame {
+    let data: Data, width: Int, height: Int, bytesPerRow: Int
 }
 
 /// Where the desktop sits: a canvas covering whole cells, with the image drawn from its top-left
@@ -89,7 +86,7 @@ final class DesktopRenderer: @unchecked Sendable {
             guard let (frame, placement, transport, _) = next else { return }
             autoreleasepool {
                 let started = DispatchTime.now().uptimeNanoseconds
-                if let frame { last = decode(frame) ?? last }
+                if let frame { last = guestFrameImage(frame.data, width: frame.width, height: frame.height, bytesPerRow: frame.bytesPerRow) ?? last }
                 guard let placement, let image = last, let escape = encode(image, placement: placement, transport: transport) else { return }
                 writer.writeAndWait("\u{1b}[\(placement.row);\(placement.column)H" + escape)
                 let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
@@ -98,20 +95,6 @@ final class DesktopRenderer: @unchecked Sendable {
                     stats.milliseconds = stats.milliseconds == 0 ? elapsed : stats.milliseconds * 0.8 + elapsed * 0.2
                 }
             }
-        }
-    }
-
-    private func decode(_ frame: DesktopFrame) -> CGImage? {
-        switch frame {
-        case .pixels(let compressed, let width, let height, let bytesPerRow):
-            guard bytesPerRow >= width * 4, let pixels = decompressedFrame(compressed, expectedSize: bytesPerRow * height),
-                  let provider = CGDataProvider(data: pixels as CFData) else { return nil }
-            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow, space: colorSpace,
-                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-        case .encoded(let data):
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         }
     }
 
