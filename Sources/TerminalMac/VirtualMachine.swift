@@ -108,6 +108,10 @@ final class MachineRuntime: NSObject, VZVirtualMachineDelegate, NSWindowDelegate
     var loop: Task<Void, Never>?
     var stopping = false
     var stopDeadline: Date?
+    let exchange: ExchangeMonitor
+    var lastSweep = Date.distantPast
+    /// Longer than any request's deadline, so nothing still in use is removed.
+    static let staleExchangeFileAge: TimeInterval = 300
 
     init(machine: Machine, directory: URL, tools: URL) throws {
         self.machine = machine
@@ -115,6 +119,7 @@ final class MachineRuntime: NSObject, VZVirtualMachineDelegate, NSWindowDelegate
         guard lock >= 0 else { throw Failure("Cannot open VM lock") }
         guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { close(lock); throw Failure("VM is already running") }
         mailbox = try Mailbox(directory.appendingPathComponent("host-control"), create: true)
+        exchange = try ExchangeMonitor(directory.appendingPathComponent("exchange"))
         vm = VZVirtualMachine(configuration: try VirtualMachines.configuration(machine, at: directory, tools: tools))
         super.init()
         vm.delegate = self
@@ -132,9 +137,20 @@ final class MachineRuntime: NSObject, VZVirtualMachineDelegate, NSWindowDelegate
                     stderr("Guest shutdown is taking longer than 60 seconds. Use stop --force if needed.")
                     self.stopDeadline = nil
                 }
+                if Date().timeIntervalSince(lastSweep) >= 2 { lastSweep = Date(); await sweepExchange() }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
         }
+    }
+    /// Clears files nobody collected. If the guest is filling the shared folder, pauses it before
+    /// it can fill the host's disk.
+    func sweepExchange() async {
+        guard exchange.sweep(olderThan: Self.staleExchangeFileAge).overLimit, vm.state == .running else { return }
+        do {
+            try await vm.pause()
+            _ = exchange.sweep(olderThan: 0, removeAll: true)
+            stderr("VM '\(machine.name)' paused: the guest exceeded the shared folder's size limit. Its files were cleared. Resume with: terminal-mac resume \(machine.name)")
+        } catch { stderr("Could not pause VM '\(machine.name)' after it exceeded the shared folder's size limit: \(error.localizedDescription)") }
     }
     func showWindow() {
         if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
